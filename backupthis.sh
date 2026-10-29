@@ -2,10 +2,10 @@
 set -euo pipefail
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rsync-backup"
-SRC_FILE="$CONFIG_DIR/letzte-quelle"
-DEST_FILE="$CONFIG_DIR/letztes-ziel"
+SRC_FILE="$CONFIG_DIR/last-source"
+DEST_FILE="$CONFIG_DIR/last-destination"
 
-# Vorgaben beim ersten Start; danach werden die letzten Pfade verwendet.
+# Defaults for the first run; previous paths are used on later runs.
 LAST_SRC="/LAST/KNOWN/SRC"
 LAST_DEST="/LAST/KNOWN/DEST"
 
@@ -26,11 +26,11 @@ prompt_path() {
     printf -v "$3" '%s' "$answer"
 }
 
-prompt_path "Quelle (Ordner, der gesichert wird)" "$LAST_SRC" SRC
-prompt_path "Ziel (Ordner für die Sicherung)" "$LAST_DEST" DEST
+prompt_path "Source directory to back up" "$LAST_SRC" SRC
+prompt_path "Destination directory for the backup" "$LAST_DEST" DEST
 
 if [[ ! -d "$SRC" ]]; then
-    echo "Quellordner nicht gefunden: $SRC" >&2
+    echo "Source directory not found: $SRC" >&2
     exit 1
 fi
 
@@ -38,11 +38,11 @@ SRC="$(realpath -e -- "$SRC")"
 DEST="$(realpath -m -- "$DEST")"
 
 if [[ "$DEST" == "/" ]]; then
-    echo "Das Wurzelverzeichnis / kann nicht als Sicherungsziel verwendet werden." >&2
+    echo "The root directory / cannot be used as the backup destination." >&2
     exit 1
 fi
 
-# Prüfen, ob das Ziel auf einem eingehängten Laufwerk liegt.
+# Check that the destination is on a mounted drive.
 PARENT="$DEST"
 while [[ ! -d "$PARENT" ]]; do
     PARENT="$(dirname "$PARENT")"
@@ -50,33 +50,33 @@ done
 TARGET_MOUNT="$(findmnt -rn -o TARGET -T "$PARENT")"
 
 if [[ "$TARGET_MOUNT" == "/" ]]; then
-    echo "Das Ziel liegt offenbar auf dem Systemlaufwerk; Sicherung abgebrochen." >&2
+    echo "The destination appears to be on the system drive; aborting." >&2
     exit 1
 fi
 
-# Quelle und Ziel dürfen sich nicht überschneiden.
+# Prevent the source and destination from overlapping.
 if [[ "$DEST" == "$SRC" || "$DEST" == "$SRC/"* || "$SRC" == "$DEST/"* ]]; then
-    echo "Quelle und Ziel dürfen nicht identisch sein oder ineinander liegen." >&2
+    echo "The source and destination must not be the same directory or overlap." >&2
     exit 1
 fi
 
 mkdir -p -- "$DEST"
 
-# Pfade für den nächsten Start merken.
+# Remember the paths for the next run.
 mkdir -p -- "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR"
 printf '%s\n' "$SRC" > "$SRC_FILE"
 printf '%s\n' "$DEST" > "$DEST_FILE"
 chmod 600 "$SRC_FILE" "$DEST_FILE"
 
-# Standardmäßig nur ein Testlauf.
+# By default, perform a dry run only.
 DRY_RUN=(--dry-run)
 if [[ "${1:-}" == "--run" ]]; then
     echo
-    echo "ACHTUNG: --delete löscht im Ziel Dateien, die in der Quelle nicht mehr existieren."
-    read -r -p "Wirklich synchronisieren? Zum Bestätigen JA eingeben: " CONFIRM
-    if [[ "$CONFIRM" != "JA" ]]; then
-        echo "Abgebrochen."
+    echo "WARNING: --delete removes destination files that no longer exist in the source."
+    read -r -p "Run the synchronization? Type YES to confirm: " CONFIRM
+    if [[ "$CONFIRM" != "YES" ]]; then
+        echo "Aborted."
         exit 0
     fi
     DRY_RUN=()
@@ -93,16 +93,16 @@ rsync -a --delete --human-readable --itemize-changes \
 echo
 if [[ -s "$LOG" ]]; then
     mapfile -t CHANGES < "$LOG"
-    echo "Betroffene Einträge: ${#CHANGES[@]}"
-    echo "Aktionscode und Dateiname:"
+    echo "Affected entries: ${#CHANGES[@]}"
+    echo "Action code and filename:"
     for entry in "${CHANGES[@]}"; do
         printf '  %s  %s\n' "${entry%%|*}" "${entry#*|}"
     done
 else
-    echo "Keine Änderungen nötig."
+    echo "No changes required."
 fi
 
 if [[ "${1:-}" != "--run" ]]; then
     echo
-    echo "Das war ein Testlauf. Zum tatsächlichen Synchronisieren: $0 --run"
+    echo "This was a dry run. To perform the synchronization, run: $0 --run"
 fi
